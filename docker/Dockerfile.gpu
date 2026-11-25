@@ -1,0 +1,30 @@
+# GPU workstation image: training, merge/export, accuracy-of-record runs (llama-server CUDA build).
+# Build:  docker build -f docker/Dockerfile.gpu -t slmbench-gpu .   (llama.cpp b12532, same tag on every tier)
+# Run:    docker run --gpus all --network host --ulimit memlock=-1:-1 -v ~/slm:/root/slm -v $PWD:/work -w /work slmbench-gpu slmbench --help
+# --network host keeps llama-server on the host loopback; the server is always started with --host 127.0.0.1.
+ARG BASE_IMAGE=pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
+FROM ${BASE_IMAGE} AS base
+
+# Verified on GitHub 2026-11-19: tag b12532 -> 08c252e221759e0f69e80f0450b295c92d2344e1 (same as Dockerfile.pilot).
+ARG LLAMA_CPP_TAG=b12532
+ARG LLAMA_CPP_COMMIT=08c252e221759e0f69e80f0450b295c92d2344e1
+
+RUN apt-get update && apt-get install -y --no-install-recommends git cmake build-essential curl libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch "${LLAMA_CPP_TAG}" https://github.com/ggml-org/llama.cpp /root/llama.cpp \
+    && test "$(git -C /root/llama.cpp rev-parse HEAD)" = "${LLAMA_CPP_COMMIT}" \
+    && cmake -S /root/llama.cpp -B /root/llama.cpp/build -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /root/llama.cpp/build --config Release -j --target llama-server llama-quantize \
+    && pip install --no-cache-dir -r /root/llama.cpp/requirements/requirements-convert_hf_to_gguf.txt
+
+WORKDIR /opt/slmbench
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY configs ./configs
+RUN pip install --no-cache-dir -e ".[gpu,rag,analysis,edge,dev]"
+ENV LLAMA_CPP_DIR=/root/llama.cpp LLAMA_CPP_TAG=${LLAMA_CPP_TAG} LLAMA_CPP_COMMIT=${LLAMA_CPP_COMMIT}
+
+# Optional reference arm. vLLM pins its own torch, so it lives in a separate stage.
+FROM base AS vllm
+RUN pip install --no-cache-dir vllm

@@ -1,0 +1,18 @@
+# CPU fine-tuning image (TRAINING-CPU.md): the pilot image (CPU-only torch 2.11.0+cpu, transformers 4.57.6,
+# datasets 5.0.1, llama.cpp b12532 conversion tools) plus peft, accelerate and bitsandbytes.
+# Reusing the pilot image keeps tokenizer, transformers and llama.cpp identical between training and evaluation.
+# Build with an empty context (nothing is copied): docker build -t slmbench-train-cpu:b12532 - < docker/Dockerfile.train-cpu
+# slmbench itself is mounted at run time (PYTHONPATH), as in the pilot scripts.
+ARG BASE_IMAGE=slmbench-pilot:b12532
+FROM ${BASE_IMAGE}
+
+# Latest on PyPI on 2026-11-19. The constraint file stops pip from replacing the pilot's torch/transformers.
+# /opt/train-cpu-versions.txt records the full freeze.
+ARG PEFT_VERSION=0.22.0
+ARG ACCELERATE_VERSION=1.16.0
+ARG BITSANDBYTES_VERSION=0.50.2
+RUN pip freeze | grep -iE '^(torch|transformers|tokenizers|numpy|safetensors|huggingface.hub)==' > /tmp/keep.txt \
+    && pip install --no-cache-dir -c /tmp/keep.txt "peft==${PEFT_VERSION}" "accelerate==${ACCELERATE_VERSION}" \
+      "bitsandbytes==${BITSANDBYTES_VERSION}" \
+    && pip freeze > /opt/train-cpu-versions.txt
+RUN python -c "import torch, transformers, peft, accelerate, bitsandbytes; print(torch.__version__, transformers.__version__, peft.__version__, accelerate.__version__, bitsandbytes.__version__)"

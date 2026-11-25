@@ -1,0 +1,168 @@
+# GPU-adapted pilot (TRAINING-GPU.md): matrix-pilot.yaml plus FFT, LoRA and QLoRA trained on a 16-24 GB NVIDIA GPU
+# (Kaggle / Colab Tesla T4 or the student's own card) with training/kaggle_train.ipynb, then evaluated in the pilot
+# containers. Base and RAG configs keep the config ids of matrix-pilot.yaml, so a copy of results/pilot.db skips
+# them. Adapted models live in /cache/models-gpu, apart from CPU-trained ones (matrix-train-cpu.yaml): both
+# branches produce the same config ids, so never merge their databases into one.
+version: 2
+seed: 42
+temperature: 0.0
+context_tokens: 4096
+prompt_overhead_tokens: 64
+chat_template_kwargs:
+  date_string: "26 Jul 2024"
+max_new_tokens:
+  pubmedqa: 16
+  finqa: 32
+  arc_easy: 16
+
+models:
+  - id: qwen2.5-0.5b
+    hf_id: Qwen/Qwen2.5-0.5B-Instruct
+    params: 494032768
+    license: Apache-2.0
+  - id: smollm2-360m
+    hf_id: HuggingFaceTB/SmolLM2-360M-Instruct
+    params: 361821120
+    license: Apache-2.0
+# Optional, gated, and its FFT does not fit a 16 GB GPU (TRAINING-GPU.md section 3): remove the "#llama " prefix
+# on a >= 24 GB GPU. The notebook does this in its session copy when MODEL contains llama3.2-1b.
+#llama   - id: llama3.2-1b
+#llama     hf_id: meta-llama/Llama-3.2-1B-Instruct
+#llama     params: 1235814400
+#llama     license: Llama 3.2 Community License (gated; accept on Hugging Face first)
+
+strategies:
+  base: {trained: false, retrieval: false, enabled: true}
+  fft: {trained: true, retrieval: false, enabled: true}
+  lora: {trained: true, retrieval: false, enabled: true}
+  qlora: {trained: true, retrieval: false, enabled: true}
+  rag: {trained: false, retrieval: true, enabled: true}
+  celora: {trained: true, retrieval: false, enabled: false}
+
+rag_k: [3, 5, 10]
+
+datasets:
+  pubmedqa:
+    role: domain
+    n_test: 500
+    context_mode: closed
+    rag_context_mode: retrieved
+    subset_strategy: stratified
+    test_ids_file: null
+  finqa:
+    role: domain
+    n_test: 500
+    context_mode: full
+    rag_context_mode: retrieved
+    subset_strategy: random
+  arc_easy:
+    role: retention
+    n_test: 300
+    retention_after: [pubmedqa, finqa]
+    subset_strategy: random
+
+plans:
+  accuracy:
+    tier: cpu
+    engine: llamacpp
+    devices: [cpu-reference]
+    precisions: [F16, Q8_0, Q4_K_M]
+    datasets: [pubmedqa, finqa]
+    subset: null
+  retention:
+    tier: cpu
+    engine: llamacpp
+    devices: [cpu-reference]
+    precisions: [F16, Q8_0, Q4_K_M]
+    datasets: [arc_easy]
+    strategies: [base, fft, lora, qlora]
+    subset: null
+  edge:
+    tier: edge
+    engine: llamacpp
+    devices: [edge-container-4c8g]
+    precisions: [F16, Q8_0, Q4_K_M]
+    datasets: [pubmedqa, finqa]
+    subset: 100
+    exclude: []
+  ref-gold:
+    reference: true
+    tier: cpu
+    engine: llamacpp
+    devices: [cpu-reference]
+    precisions: [F16, Q8_0, Q4_K_M]
+    datasets: [pubmedqa]
+    strategies: [base]
+    context_mode: gold
+    subset: null
+
+# No energy counter in the virtualised host, so no idle baseline and a single block per config.
+runner:
+  warmup_queries: 3
+  idle_baseline_s: 0
+  energy_repeats: 1
+  block_order_seed: 42
+  cooldown_below_c: 50
+  rerun_throttled: true
+
+# DESIGN.md 3.3 recipe. Only `optimizer` and `per_device_batch_size` differ from matrix.yaml: on 16-24 GB GPUs FFT
+# with fp32 master weights fits only with 8-bit AdamW and one sequence per micro-batch (TRAINING-GPU.md section 3),
+# so every strategy and model uses the same optimiser and micro-batch. Effective batch size stays 16.
+training:
+  selection_seed: 42
+  variability_seeds: [43, 44]
+  lr_grid:
+    fft: [1.0e-5, 2.0e-5]
+    lora: [1.0e-4, 2.0e-4]
+    qlora: [1.0e-4, 2.0e-4]
+    celora: [1.0e-4, 2.0e-4]
+  datasets:
+    pubmedqa: {n_train: 10000, class_balanced: true}
+    finqa: {n_train: null, class_balanced: false}
+  val_metric: accuracy
+  epochs: 1
+  effective_batch_size: 16
+  per_device_batch_size: 1
+  lr_scheduler: cosine
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  max_seq_len: 4096
+  optimizer: adamw_bnb_8bit
+  gradient_checkpointing: true
+  fft_master_dtype: float32
+  qlora_upcast_non_quantized: true
+  logging_steps: 10
+  lora: {r: 16, alpha: 32, dropout: 0.05, target_modules: all-linear}
+  qlora: {quant_type: nf4, double_quant: true, compute_dtype: bfloat16}
+
+# Container paths on the dev host. Checkpoints and merged models go to "<models_dir>-ckpt" (scratch on Kaggle);
+# base GGUFs are the pilot's own files.
+paths:
+  models_dir: /cache/models-gpu
+  hf_trained: "{models_dir}-ckpt/{model}/{strategy}-{train_dataset}/lr{lr}-s{seed}"
+  hf_merged: "{models_dir}-ckpt/{model}/{strategy}-{train_dataset}/merged"
+  gguf: "{models_dir}/{model}/{strategy}-{train_dataset}/{model}-{strategy}-{train_dataset}-{precision}.gguf"
+  base_gguf: "/cache/models/{model}/base/{model}-base-{precision}.gguf"
+
+analysis:
+  alpha: 0.05
+  bootstrap_resamples: 10000
+  bootstrap_seed: 42
+  noninferiority_delta: 0.05
+  floor_min_discordant: 10
+  floor_min_accuracy: 0.05
+  parity_threshold: 0.98
+  accuracy_plan: accuracy
+  retention_plan: retention
+  edge_plan: edge
+  precisions: [F16, Q8_0, Q4_K_M]
+  rag_k_for_sq2: 5
+
+report:
+  caption_note: >-
+    Pilot, container-emulated edge: Docker containers on an x86 Intel Xeon Platinum 8488C host, edge tier capped
+    to 4 CPUs and 8 GB (edge-container-4c8g), accuracy of record on 16 CPUs (cpu-reference). Not Raspberry Pi
+    results; absolute latencies are not edge-device latencies, only relative effects (precision, K) are tested.
+    Fine-tuned models (FFT, LoRA, QLoRA) were trained on an NVIDIA Tesla T4 (16 GB, fp16 autocast, 8-bit AdamW;
+    GPU model per session in the environment table), not on the GPU workstation of DESIGN.md 3.3.
+  energy_not_measured: no energy counter in the virtualised host (no RAPL, no NVML, no meter)

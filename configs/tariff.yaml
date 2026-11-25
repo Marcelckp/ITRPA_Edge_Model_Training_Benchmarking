@@ -1,0 +1,7 @@
+# Override per run with --tariff / --grid-factor.
+tariff_zar_per_kwh:
+  value: 4.14
+  source: "City of Cape Town Domestic Block 1 incl. VAT, effective 1 July 2026 (verify against CoCT Annexure 6 tariff schedule)"
+grid_kgco2e_per_kwh:
+  value: 0.960
+  source: "DFFE (2026) 2024 Grid Emission Factors report, South Africa"

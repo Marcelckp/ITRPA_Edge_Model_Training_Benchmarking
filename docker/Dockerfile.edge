@@ -1,0 +1,27 @@
+# Edge image (Raspberry Pi 5 arm64 or x86 thin client amd64): llama-server CPU build + slmbench.
+# Build on the device itself so llama.cpp is compiled for its CPU:
+#   docker build -f docker/Dockerfile.edge -t slmbench-edge .        (llama.cpp b12532, same tag on every tier)
+# Run with host networking and /dev/vchiq (Pi, for vcgencmd) or /sys/class/powercap (RAPL, needs --privileged or root):
+# --ulimit memlock=-1:-1 lets llama-server lock the weights (--load-mode mmap+mlock):
+#   docker run --network host --ulimit memlock=-1:-1 --device /dev/vchiq -v ~/slm:/root/slm -v $PWD:/work -w /work slmbench-edge slmbench --help
+# Containers add memory and scheduling overhead; the RUNBOOK's native install is the measured setup.
+FROM python:3.11-slim-bookworm
+
+# Verified on GitHub 2026-11-19: tag b12532 -> 08c252e221759e0f69e80f0450b295c92d2344e1 (same as Dockerfile.pilot).
+ARG LLAMA_CPP_TAG=b12532
+ARG LLAMA_CPP_COMMIT=08c252e221759e0f69e80f0450b295c92d2344e1
+
+RUN apt-get update && apt-get install -y --no-install-recommends git cmake build-essential libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch "${LLAMA_CPP_TAG}" https://github.com/ggml-org/llama.cpp /root/llama.cpp \
+    && test "$(git -C /root/llama.cpp rev-parse HEAD)" = "${LLAMA_CPP_COMMIT}" \
+    && cmake -S /root/llama.cpp -B /root/llama.cpp/build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /root/llama.cpp/build --config Release -j --target llama-server
+
+WORKDIR /opt/slmbench
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY configs ./configs
+RUN pip install --no-cache-dir -e ".[edge,rag,analysis]"
+ENV LLAMA_CPP_DIR=/root/llama.cpp LLAMA_CPP_TAG=${LLAMA_CPP_TAG} LLAMA_CPP_COMMIT=${LLAMA_CPP_COMMIT}

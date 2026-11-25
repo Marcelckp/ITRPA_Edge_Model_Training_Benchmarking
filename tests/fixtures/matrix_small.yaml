@@ -1,0 +1,60 @@
+# Toy matrix for offline tests (mock backend only).
+version: 2
+seed: 42
+temperature: 0.0
+context_tokens: 4096
+prompt_overhead_tokens: 64
+chat_template_kwargs: {date_string: "26 Jul 2024"}
+max_new_tokens: {pubmedqa: 16, finqa: 32, arc_easy: 16}
+models:
+  - {id: toy-a, hf_id: toy/a, params: 1}
+  - {id: toy-b, hf_id: toy/b, params: 2}
+strategies:
+  base: {trained: false, retrieval: false, enabled: true}
+  fft: {trained: true, retrieval: false, enabled: true}
+  lora: {trained: true, retrieval: false, enabled: true}
+  qlora: {trained: true, retrieval: false, enabled: true}
+  rag: {trained: false, retrieval: true, enabled: true}
+rag_k: [3, 5, 10]
+datasets:
+  pubmedqa: {role: domain, n_test: 12, context_mode: closed, rag_context_mode: retrieved, subset_strategy: stratified}
+  finqa: {role: domain, n_test: 10, context_mode: full, rag_context_mode: retrieved, subset_strategy: random}
+  arc_easy: {role: retention, n_test: 10, retention_after: [pubmedqa, finqa], subset_strategy: random}
+plans:
+  accuracy: {tier: gpu, engine: llamacpp, devices: [gpu-workstation], precisions: [F16, Q8_0, Q4_K_M], datasets: [pubmedqa, finqa], subset: null}
+  retention: {tier: gpu, engine: llamacpp, devices: [gpu-workstation], precisions: [F16, Q8_0, Q4_K_M], datasets: [arc_easy], subset: null}
+  edge: {tier: edge, engine: llamacpp, devices: [edge-pi5], precisions: [F16, Q8_0, Q4_K_M], datasets: [pubmedqa, finqa], subset: 6}
+  ref-gold: {reference: true, tier: gpu, engine: llamacpp, devices: [gpu-workstation], precisions: [Q4_K_M], datasets: [pubmedqa], strategies: [base], context_mode: gold, subset: null}
+runner: {warmup_queries: 1, idle_baseline_s: 0.05, energy_repeats: 3, block_order_seed: 42, cooldown_below_c: 50, rerun_throttled: true}
+training:
+  selection_seed: 42
+  variability_seeds: [43, 44]
+  lr_grid: {fft: [1.0e-5, 2.0e-5], lora: [1.0e-4, 2.0e-4], qlora: [1.0e-4, 2.0e-4]}
+  datasets: {pubmedqa: {n_train: 10, class_balanced: true}, finqa: {n_train: null, class_balanced: false}}
+  val_metric: accuracy
+  epochs: 1
+  effective_batch_size: 16
+  per_device_batch_size: 4
+  lr_scheduler: cosine
+  warmup_ratio: 0.03
+  max_seq_len: 4096
+  optimizer: adamw_torch
+  gradient_checkpointing: true
+  fft_master_dtype: float32
+  qlora_upcast_non_quantized: true
+  logging_steps: 10
+  lora: {r: 16, alpha: 32, dropout: 0.05, target_modules: all-linear}
+  qlora: {quant_type: nf4, double_quant: true, compute_dtype: bfloat16}
+paths:
+  models_dir: /tmp/slmbench-toy-models
+analysis:
+  alpha: 0.05
+  bootstrap_resamples: 500
+  bootstrap_seed: 42
+  noninferiority_delta: 0.05
+  floor_min_discordant: 10
+  floor_min_accuracy: 0.05
+  parity_threshold: 0.98
+  accuracy_plan: accuracy
+  retention_plan: retention
+  rag_k_for_sq2: 5

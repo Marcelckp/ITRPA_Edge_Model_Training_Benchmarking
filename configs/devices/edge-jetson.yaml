@@ -1,0 +1,30 @@
+name: edge-jetson
+tier: edge
+description: "Optional NVIDIA Jetson Orin Nano. [[CONFIRM: only if actually used]]"
+paths:
+  models_dir: ~/slm/models
+  llama_cpp_dir: ~/llama.cpp
+# llama.cpp b12532 replaced --mlock with --load-mode; mmap+mlock keeps the old --mlock behaviour. --cache-ram 0
+# disables the server-side prompt cache, which would reuse prefixes across queries and inflate memory.
+# --fit off stops the server from changing unset arguments to fit memory, so every device runs the same settings.
+backends:
+  llamacpp:
+    kind: llamacpp
+    base_url: http://127.0.0.1:8080
+    api: chat
+    timeout_s: 1800
+    manage_server: true
+    startup_timeout_s: 600
+    server_cmd: ["{llama_cpp_dir}/build/bin/llama-server", "-m", "{model_path}", "--host", "127.0.0.1",
+                 "--port", "8080", "-c", "4096", "-ngl", "99", "--seed", "42", "-np", "1",
+                 "--load-mode", "mmap+mlock", "--cache-ram", "0", "--fit", "off", "--jinja"]
+telemetry:
+  interval_s: 0.1
+  power: [tegrastats]
+  memory: [rss]
+  temperature: thermal_zone
+  tegrastats_cmd: ["tegrastats", "--interval", "100"]
+# Overrides matrix.yaml `runner` for this device. Cool-down gate: wait until below this temperature.
+runner:
+  cooldown_below_c: 50
+  thermal_wait_max_s: 900

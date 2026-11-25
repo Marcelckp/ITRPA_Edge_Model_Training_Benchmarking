@@ -1,0 +1,55 @@
+# Container-emulated edge pilot image (PILOT.md): llama.cpp CPU build at a pinned release tag, the GGUF
+# conversion tools from the same tree (CPU-only torch), and slmbench with [edge,rag,analysis].
+# Build from prototype/:  docker build -f docker/Dockerfile.pilot -t slmbench-pilot:b12532 .
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm
+
+FROM ${PYTHON_IMAGE} AS llama
+# Verified on GitHub 2026-11-19: tag b12532 -> 08c252e221759e0f69e80f0450b295c92d2344e1.
+ARG LLAMA_CPP_TAG=b12532
+ARG LLAMA_CPP_COMMIT=08c252e221759e0f69e80f0450b295c92d2344e1
+RUN apt-get update && apt-get install -y --no-install-recommends git cmake build-essential ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch "${LLAMA_CPP_TAG}" https://github.com/ggml-org/llama.cpp /src \
+    && test "$(git -C /src rev-parse HEAD)" = "${LLAMA_CPP_COMMIT}"
+# GGML_CPU_ALL_VARIANTS picks the best CPU kernels at run time, so the image is not tied to the build host's CPU.
+RUN cmake -S /src -B /src/build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON \
+      -DGGML_CPU_ALL_VARIANTS=ON -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_OPENSSL=OFF \
+      -DLLAMA_USE_PREBUILT_UI=OFF \
+    && cmake --build /src/build --config Release -j"$(nproc)"
+RUN mkdir -p /opt/llama.cpp/build/bin \
+    && cp -P /src/build/bin/llama-server /src/build/bin/llama-quantize /opt/llama.cpp/build/bin/ \
+    && find /src/build -name '*.so*' -exec cp -P {} /opt/llama.cpp/build/bin/ \; \
+    && cp /src/*.py /opt/llama.cpp/ \
+    && cp -r /src/gguf-py /src/requirements /opt/llama.cpp/ \
+    && if [ -d /src/conversion ]; then cp -r /src/conversion /opt/llama.cpp/; fi
+
+FROM ${PYTHON_IMAGE}
+ARG LLAMA_CPP_TAG=b12532
+ARG LLAMA_CPP_COMMIT=08c252e221759e0f69e80f0450b295c92d2344e1
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=llama /opt/llama.cpp /opt/llama.cpp
+# The requirements file pins the CPU torch wheel index; gguf comes from the same tree. One resolve keeps
+# huggingface-hub inside transformers' supported range (datasets alone would pull a newer major).
+RUN pip install --no-cache-dir -r /opt/llama.cpp/requirements/requirements-convert_hf_to_gguf.txt \
+      /opt/llama.cpp/gguf-py datasets "huggingface-hub<1.0"
+
+WORKDIR /opt/slmbench
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY configs ./configs
+RUN pip install --no-cache-dir -e ".[edge,rag,analysis]"
+
+# Scripts run containers as the host uid, which has no passwd entry here: getpass (torch) falls back to USER.
+ENV LLAMA_CPP_DIR=/opt/llama.cpp \
+    LLAMA_CPP_TAG=${LLAMA_CPP_TAG} \
+    LLAMA_CPP_COMMIT=${LLAMA_CPP_COMMIT} \
+    LD_LIBRARY_PATH=/opt/llama.cpp/build/bin \
+    HF_HOME=/cache/hf \
+    HOME=/tmp \
+    USER=slmbench \
+    TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor \
+    MPLCONFIGDIR=/tmp/matplotlib \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+RUN /opt/llama.cpp/build/bin/llama-server --version && python -c "import gguf, torch, transformers, slmbench"

@@ -1,0 +1,42 @@
+name: gpu-workstation
+tier: gpu
+description: "Consumer GPU workstation (training, export, accuracy runs). [[CONFIRM: GPU model, VRAM, CPU, RAM]]"
+paths:
+  models_dir: ~/slm/models
+  llama_cpp_dir: ~/llama.cpp
+# llama.cpp b12532 replaced --mlock with --load-mode; mmap+mlock keeps the old --mlock behaviour. --cache-ram 0
+# disables the server-side prompt cache, which would reuse prefixes across queries and inflate memory.
+# --fit off stops the server from changing unset arguments to fit memory, so every device runs the same settings.
+backends:
+  vllm:
+    kind: vllm
+    base_url: http://127.0.0.1:8000
+    api: chat
+    served_model_name: slmbench
+    timeout_s: 600
+    manage_server: true
+    startup_timeout_s: 600
+    server_cmd: ["vllm", "serve", "{model_path}", "--host", "127.0.0.1", "--port", "8000",
+                 "--served-model-name", "slmbench", "--seed", "42", "--dtype", "bfloat16",
+                 "--max-model-len", "4096", "--disable-log-requests"]
+  llamacpp:
+    kind: llamacpp
+    base_url: http://127.0.0.1:8080
+    api: chat
+    timeout_s: 600
+    manage_server: true
+    startup_timeout_s: 300
+    server_cmd: ["{llama_cpp_dir}/build/bin/llama-server", "-m", "{model_path}", "--host", "127.0.0.1",
+                 "--port", "8080", "-c", "4096", "-ngl", "99", "--seed", "42", "-np", "1",
+                 "--load-mode", "mmap+mlock", "--cache-ram", "0", "--fit", "off", "--jinja"]
+# Ampere+ NVML power is a ~1 s average: joules come from the energy-counter difference; 100 ms samples are traces only.
+telemetry:
+  interval_s: 0.1
+  power: [nvml]
+  gpu_index: 0
+  memory: [nvml, rss]
+  temperature: nvml
+# Overrides matrix.yaml `runner` for this device. Cool-down gate: wait until below this temperature.
+runner:
+  cooldown_below_c: 50
+  thermal_wait_max_s: 900

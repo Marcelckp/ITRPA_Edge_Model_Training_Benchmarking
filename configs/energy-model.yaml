@@ -1,0 +1,25 @@
+# Energy ESTIMATE model for hosts without an energy counter (TRAINING-CPU.md section 5). Figures computed with
+# it are "estimated from CPU time, not metered" and never enter energy_j columns or hypothesis decisions.
+# Green Algorithms (Lannelongue, Grealey and Inouye, 2021): E = t x PUE x (n_cores x P_core x u + mem_GB x P_mem).
+# With container CPU time, n_cores x u x t is the measured CPU-seconds, so E = PUE x (cpu_s x P_core + wall_s x mem_GB x P_mem).
+method: green-algorithms
+energy_basis: "estimated:green-algorithms"
+label: "estimated from CPU time, not metered (Green Algorithms model)"
+cpu_model: Intel Xeon Platinum 8488C
+# Intel publishes no TDP for the AWS-only 8488C. Range = TDP / cores of the 48-core Sapphire Rapids Platinum parts
+# in Green Algorithms' CPU table (data v3.1 CPUs-manual.csv): 8461V 300 W, 8468H/8468V 330 W, 8468 350 W.
+# AWS lists 96 physical cores for the two-socket m7i.48xlarge, i.e. 48 per socket.
+p_core_w:
+  low: 6.25
+  central: 6.875
+  high: 7.2917
+p_core_source: >-
+  Green Algorithms data v3.1 chips/manual/CPUs-manual.csv (48-core Sapphire Rapids Platinum: 8461V 300 W,
+  8468H 330 W, 8468V 330 W, 8468 350 W); core count from AWS EC2 instance type specifications (m7i.48xlarge).
+p_mem_w_per_gb: 0.3725
+p_mem_source: "Green Algorithms data v3.1 hardware-impacts.csv, memoryPower = 0.3725 W/GB"
+# The device itself, not a data centre: no cooling or power-distribution overhead is added.
+pue: 1.0
+# CPU-seconds are logical-CPU seconds. The pilot and training CPU sets use one thread per physical core with the
+# siblings idle, so one CPU-second is one core-second; set 2 if both hyper-threads of every core are busy.
+threads_per_core: 1.0

@@ -1,0 +1,36 @@
+name: edge-thinclient
+tier: edge
+description: "x86 thin client, 8 GB RAM. [[CONFIRM: make/model, CPU, OS]]"
+paths:
+  models_dir: ~/slm/models
+  llama_cpp_dir: ~/llama.cpp
+# [[CONFIRM: -t threads = physical cores; keep identical for every config]]
+# llama.cpp b12532 replaced --mlock with --load-mode; mmap+mlock keeps the old --mlock behaviour. --cache-ram 0
+# disables the server-side prompt cache, which would reuse prefixes across queries and inflate memory.
+# --fit off stops the server from changing unset arguments to fit memory, so every device runs the same settings.
+backends:
+  llamacpp:
+    kind: llamacpp
+    base_url: http://127.0.0.1:8080
+    api: chat
+    timeout_s: 1800
+    manage_server: true
+    startup_timeout_s: 600
+    server_cmd: ["{llama_cpp_dir}/build/bin/llama-server", "-m", "{model_path}", "--host", "127.0.0.1",
+                 "--port", "8080", "-c", "4096", "-t", "4", "--seed", "42", "-np", "1",
+                 "--load-mode", "mmap+mlock", "--cache-ram", "0", "--fit", "off", "--jinja"]
+  ollama:
+    kind: ollama
+    base_url: http://127.0.0.1:11434
+    model_template: "slmbench-{model}-{strategy}-{train_dataset}-{precision}"
+    timeout_s: 1800
+    manage_server: false
+telemetry:
+  interval_s: 0.1
+  power: [rapl]
+  memory: [rss]
+  temperature: thermal_zone
+# Overrides matrix.yaml `runner` for this device. Cool-down gate: wait until below this temperature.
+runner:
+  cooldown_below_c: 50
+  thermal_wait_max_s: 900

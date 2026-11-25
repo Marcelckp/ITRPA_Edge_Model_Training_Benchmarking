@@ -1,0 +1,27 @@
+# Pinned GPU training stack for training/kaggle_train.ipynb and own-GPU runs (TRAINING-GPU.md section 4).
+# Resolves on Python 3.11-3.13 (checked with `uv pip compile` for x86_64-manylinux_2_28, 2026-11-19).
+# torch comes from https://download.pytorch.org/whl/cu126 (install it first): the PyPI and cu128+/cu13 wheels have
+# no sm_60 kernels (Pascal P100), the cu126 wheels keep sm_60 and sm_75 (T4).
+# transformers and torch match llama.cpp b12532 requirements/requirements-convert_legacy_llama.txt and
+# requirements-convert_hf_to_gguf.txt, so training and GGUF conversion run in one environment.
+torch==2.11.0
+transformers==4.57.6
+peft==0.18.1
+accelerate==1.12.0
+# NF4 and 8-bit optimisers need compute capability >= 6.0; the PyPI wheel's CUDA 11.8-12.6 libraries target sm60+.
+bitsandbytes==0.49.2
+datasets==4.5.0
+huggingface-hub==0.36.2
+tokenizers==0.22.2
+safetensors==0.7.0
+nvidia-ml-py==13.590.48
+numpy==2.2.6
+sentencepiece==0.2.1
+protobuf==4.25.8
+rank_bm25==0.2.2
+scipy==1.16.3
+pandas==3.1.1
+matplotlib==3.11.2
+pyyaml==6.0.3
+psutil==7.2.2
+requests==2.34.2

@@ -1,0 +1,134 @@
+# Container-emulated edge pilot (DESIGN.md 3.0, refinement (A); PILOT.md). Same schema as matrix.yaml.
+# Base and RAG only: the pilot host has no GPU, so no FFT/LoRA/QLoRA. Edge results come from Docker containers
+# capped to 4 CPUs / 8 GB on an x86 Xeon host and are never Raspberry Pi results.
+version: 2
+seed: 42
+temperature: 0.0
+context_tokens: 4096
+prompt_overhead_tokens: 64
+chat_template_kwargs:
+  date_string: "26 Jul 2024"
+max_new_tokens:
+  pubmedqa: 16
+  finqa: 32
+  arc_easy: 16
+
+models:
+  - id: qwen2.5-0.5b
+    hf_id: Qwen/Qwen2.5-0.5B-Instruct
+    params: 494032768
+    license: Apache-2.0
+  - id: smollm2-360m
+    hf_id: HuggingFaceTB/SmolLM2-360M-Instruct
+    params: 361821120
+    license: Apache-2.0
+# Optional, gated: accept the licence on Hugging Face, export HF_TOKEN, then remove the "#llama " prefix below.
+#llama   - id: llama3.2-1b
+#llama     hf_id: meta-llama/Llama-3.2-1B-Instruct
+#llama     params: 1235814400
+#llama     license: Llama 3.2 Community License (gated; accept on Hugging Face first)
+
+strategies:
+  base: {trained: false, retrieval: false, enabled: true}
+  fft: {trained: true, retrieval: false, enabled: false}
+  lora: {trained: true, retrieval: false, enabled: false}
+  qlora: {trained: true, retrieval: false, enabled: false}
+  rag: {trained: false, retrieval: true, enabled: true}
+  celora: {trained: true, retrieval: false, enabled: false}
+
+rag_k: [3, 5, 10]
+
+datasets:
+  pubmedqa:
+    role: domain
+    n_test: 500
+    context_mode: closed
+    rag_context_mode: retrieved
+    subset_strategy: stratified
+    test_ids_file: null
+  finqa:
+    role: domain
+    n_test: 500
+    context_mode: full
+    rag_context_mode: retrieved
+    subset_strategy: random
+  arc_easy:
+    role: retention
+    n_test: 300
+    retention_after: [pubmedqa, finqa]
+    subset_strategy: random
+
+plans:
+  accuracy:
+    tier: cpu
+    engine: llamacpp
+    devices: [cpu-reference]
+    precisions: [F16, Q8_0, Q4_K_M]
+    datasets: [pubmedqa, finqa]
+    subset: null
+  retention:
+    tier: cpu
+    engine: llamacpp
+    devices: [cpu-reference]
+    precisions: [F16, Q8_0, Q4_K_M]
+    datasets: [arc_easy]
+    strategies: [base]
+    subset: null
+  edge:
+    tier: edge
+    engine: llamacpp
+    devices: [edge-container-4c8g]
+    precisions: [F16, Q8_0, Q4_K_M]
+    datasets: [pubmedqa, finqa]
+    subset: 100
+    exclude: []
+  ref-gold:
+    reference: true
+    tier: cpu
+    engine: llamacpp
+    devices: [cpu-reference]
+    precisions: [F16, Q8_0, Q4_K_M]
+    datasets: [pubmedqa]
+    strategies: [base]
+    context_mode: gold
+    subset: null
+
+# No energy counter in the virtualised host, so no idle baseline and a single block per config.
+runner:
+  warmup_queries: 3
+  idle_baseline_s: 0
+  energy_repeats: 1
+  block_order_seed: 42
+  cooldown_below_c: 50
+  rerun_throttled: true
+
+training:
+  selection_seed: 42
+  variability_seeds: []
+  lr_grid: {}
+  datasets: {}
+
+paths:
+  models_dir: /cache/models
+  base_gguf: "{models_dir}/{model}/base/{model}-base-{precision}.gguf"
+
+analysis:
+  alpha: 0.05
+  bootstrap_resamples: 10000
+  bootstrap_seed: 42
+  noninferiority_delta: 0.05
+  floor_min_discordant: 10
+  floor_min_accuracy: 0.05
+  parity_threshold: 0.98
+  accuracy_plan: accuracy
+  retention_plan: retention
+  edge_plan: edge
+  precisions: [F16, Q8_0, Q4_K_M]
+  rag_k_for_sq2: 5
+
+report:
+  caption_note: >-
+    Pilot, container-emulated edge: Docker containers on an x86 Intel Xeon Platinum 8488C host, edge tier capped
+    to 4 CPUs and 8 GB (edge-container-4c8g), accuracy of record on 16 CPUs (cpu-reference). Not Raspberry Pi
+    results; absolute latencies are not edge-device latencies, only relative effects (precision, K) are tested.
+  energy_not_measured: no energy counter in the virtualised host (no RAPL, no NVML, no meter)

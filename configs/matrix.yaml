@@ -1,0 +1,166 @@
+# Experimental matrix (DESIGN.md v2, sections 3.1-3.7). Edit here, not in code.
+version: 2
+seed: 42
+temperature: 0.0
+context_tokens: 4096
+# Token budget reserved for chat-template markup when fitting context into context_tokens.
+prompt_overhead_tokens: 64
+# Passed to the chat template at training (HF) and evaluation (llama-server --jinja); a fixed date keeps the
+# Llama 3 "Today Date" header identical across days.
+chat_template_kwargs:
+  date_string: "26 Jul 2024"
+max_new_tokens:
+  pubmedqa: 16
+  finqa: 32
+  arc_easy: 16
+
+models:
+  - id: llama3.2-1b
+    hf_id: meta-llama/Llama-3.2-1B-Instruct
+    params: 1235814400
+    license: Llama 3.2 Community License (gated; accept on Hugging Face first)
+  - id: qwen2.5-0.5b
+    hf_id: Qwen/Qwen2.5-0.5B-Instruct
+    params: 494032768
+    license: Apache-2.0
+  - id: smollm2-360m
+    hf_id: HuggingFaceTB/SmolLM2-360M-Instruct
+    params: 361821120
+    license: Apache-2.0
+
+# trained: one adapted model per model x dataset; retrieval: base weights + BM25 context.
+strategies:
+  base: {trained: false, retrieval: false, enabled: true}
+  fft: {trained: true, retrieval: false, enabled: true}
+  lora: {trained: true, retrieval: false, enabled: true}
+  qlora: {trained: true, retrieval: false, enabled: true}
+  rag: {trained: false, retrieval: true, enabled: true}
+  celora: {trained: true, retrieval: false, enabled: false}
+
+rag_k: [3, 5, 10]
+
+datasets:
+  pubmedqa:
+    role: domain
+    n_test: 500
+    context_mode: closed
+    rag_context_mode: retrieved
+    subset_strategy: stratified
+    # PMIDs of the original paper's 500-item test split (test_ground_truth.json); required for real runs.
+    test_ids_file: null
+  finqa:
+    role: domain
+    n_test: 500
+    context_mode: full
+    rag_context_mode: retrieved
+    subset_strategy: random
+  arc_easy:
+    role: retention
+    n_test: 300
+    retention_after: [pubmedqa, finqa]
+    subset_strategy: random
+
+# One plan = one block of the matrix on a set of devices with one engine. Reference arms are separate plans.
+plans:
+  accuracy:
+    tier: gpu
+    engine: llamacpp
+    devices: [gpu-workstation]
+    precisions: [F16, Q8_0, Q4_K_M]
+    datasets: [pubmedqa, finqa]
+    subset: null
+  retention:
+    tier: gpu
+    engine: llamacpp
+    devices: [gpu-workstation]
+    precisions: [F16, Q8_0, Q4_K_M]
+    datasets: [arc_easy]
+    subset: null
+  edge:
+    tier: edge
+    engine: llamacpp
+    devices: [edge-pi5, edge-thinclient]
+    precisions: [F16, Q8_0, Q4_K_M]
+    datasets: [pubmedqa, finqa]
+    subset: 100
+    # Each entry drops configs whose fields all match, e.g. {device: edge-pi5, precision: F16, model: llama3.2-1b}
+    exclude: []
+  ref-gold:
+    reference: true
+    tier: gpu
+    engine: llamacpp
+    devices: [gpu-workstation]
+    precisions: [F16, Q8_0, Q4_K_M]
+    datasets: [pubmedqa]
+    strategies: [base]
+    context_mode: gold
+    subset: null
+  ref-vllm:
+    reference: true
+    tier: gpu
+    engine: vllm
+    devices: [gpu-workstation]
+    precisions: [bf16]
+    datasets: [pubmedqa, finqa]
+    strategies: [base, fft, lora, qlora]
+    subset: null
+
+runner:
+  warmup_queries: 3
+  idle_baseline_s: 60
+  energy_repeats: 3
+  block_order_seed: 42
+  cooldown_below_c: 50
+  rerun_throttled: true
+
+training:
+  selection_seed: 42
+  variability_seeds: [43, 44]
+  lr_grid:
+    fft: [1.0e-5, 2.0e-5]
+    lora: [1.0e-4, 2.0e-4]
+    qlora: [1.0e-4, 2.0e-4]
+    celora: [1.0e-4, 2.0e-4]
+  datasets:
+    pubmedqa: {n_train: 10000, class_balanced: true}
+    finqa: {n_train: null, class_balanced: false}
+  val_metric: accuracy
+  epochs: 1
+  effective_batch_size: 16
+  per_device_batch_size: 4
+  lr_scheduler: cosine
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  max_seq_len: 4096
+  # Applied to every strategy so time and energy are not confounded (DESIGN.md 3.3).
+  optimizer: adamw_torch
+  gradient_checkpointing: true
+  # FFT loads fp32 master weights and trains under bf16 autocast (fp16 on GPUs without bf16).
+  fft_master_dtype: float32
+  # Standard QLoRA recipe; its fp32 upcast of non-quantised params is reported as QLoRA memory.
+  qlora_upcast_non_quantized: true
+  logging_steps: 10
+  lora: {r: 16, alpha: 32, dropout: 0.05, target_modules: all-linear}
+  qlora: {quant_type: nf4, double_quant: true, compute_dtype: bfloat16}
+
+paths:
+  models_dir: ~/slm/models
+  hf_trained: "{models_dir}/{model}/{strategy}-{train_dataset}/lr{lr}-s{seed}"
+  hf_merged: "{models_dir}/{model}/{strategy}-{train_dataset}/merged"
+  gguf: "{models_dir}/{model}/{strategy}-{train_dataset}/{model}-{strategy}-{train_dataset}-{precision}.gguf"
+  base_gguf: "{models_dir}/{model}/base/{model}-base-{precision}.gguf"
+
+analysis:
+  alpha: 0.05
+  bootstrap_resamples: 10000
+  bootstrap_seed: 42
+  noninferiority_delta: 0.05
+  floor_min_discordant: 10
+  floor_min_accuracy: 0.05
+  parity_threshold: 0.98
+  accuracy_plan: accuracy
+  retention_plan: retention
+  edge_plan: edge
+  # Ordered by the predicted decrease in memory/energy; defaults to the edge plan's precisions.
+  precisions: [F16, Q8_0, Q4_K_M]
+  rag_k_for_sq2: 5

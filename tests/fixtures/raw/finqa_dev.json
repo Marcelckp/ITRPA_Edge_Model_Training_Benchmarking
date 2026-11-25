@@ -1,0 +1,150 @@
+[
+ {
+  "id": "TOY/200",
+  "pre_text": [
+   "TOY FIXTURE company 200 invented report.",
+   "revenue was 300.0 toy units in year a."
+  ],
+  "post_text": [
+   "costs were 250.5 toy units.",
+   "nothing else happened."
+  ],
+  "table": [
+   [
+    "item",
+    "year a",
+    "year b"
+   ],
+   [
+    "revenue",
+    "300.0",
+    "310.0"
+   ],
+   [
+    "costs",
+    "250.5",
+    "255.5"
+   ]
+  ],
+  "qa": {
+   "question": "what was toy revenue in year b 0?",
+   "answer": "110.0",
+   "exe_ans": 110.0,
+   "gold_inds": {
+    "table_1": "revenue ...",
+    "text_1": "revenue ..."
+   }
+  }
+ },
+ {
+  "id": "TOY/201",
+  "pre_text": [
+   "TOY FIXTURE company 201 invented report.",
+   "revenue was 301.0 toy units in year a."
+  ],
+  "post_text": [
+   "costs were 251.5 toy units.",
+   "nothing else happened."
+  ],
+  "table": [
+   [
+    "item",
+    "year a",
+    "year b"
+   ],
+   [
+    "revenue",
+    "301.0",
+    "311.0"
+   ],
+   [
+    "costs",
+    "251.5",
+    "256.5"
+   ]
+  ],
+  "qa": {
+   "question": "what was toy revenue in year b 1?",
+   "answer": "111.0",
+   "exe_ans": 111.0,
+   "gold_inds": {
+    "table_1": "revenue ...",
+    "text_1": "revenue ..."
+   }
+  }
+ },
+ {
+  "id": "TOY/202",
+  "pre_text": [
+   "TOY FIXTURE company 202 invented report.",
+   "revenue was 302.0 toy units in year a."
+  ],
+  "post_text": [
+   "costs were 252.5 toy units.",
+   "nothing else happened."
+  ],
+  "table": [
+   [
+    "item",
+    "year a",
+    "year b"
+   ],
+   [
+    "revenue",
+    "302.0",
+    "312.0"
+   ],
+   [
+    "costs",
+    "252.5",
+    "257.5"
+   ]
+  ],
+  "qa": {
+   "question": "what was toy revenue in year b 2?",
+   "answer": "112.0",
+   "exe_ans": 112.0,
+   "gold_inds": {
+    "table_1": "revenue ...",
+    "text_1": "revenue ..."
+   }
+  }
+ },
+ {
+  "id": "TOY/203",
+  "pre_text": [
+   "TOY FIXTURE company 203 invented report.",
+   "revenue was 303.0 toy units in year a."
+  ],
+  "post_text": [
+   "costs were 253.5 toy units.",
+   "nothing else happened."
+  ],
+  "table": [
+   [
+    "item",
+    "year a",
+    "year b"
+   ],
+   [
+    "revenue",
+    "303.0",
+    "313.0"
+   ],
+   [
+    "costs",
+    "253.5",
+    "258.5"
+   ]
+  ],
+  "qa": {
+   "question": "what was toy revenue in year b 3?",
+   "answer": "113.0",
+   "exe_ans": 113.0,
+   "gold_inds": {
+    "table_1": "revenue ...",
+    "text_1": "revenue ..."
+   }
+  }
+ }
+]
